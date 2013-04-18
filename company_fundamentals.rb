@@ -3,23 +3,37 @@ require 'nokogiri'
 require 'open-uri'
 
 class CompanyFundamentals
-  def initialize(ticker, quarterly=false)
+  def initialize(ticker, quarterly=false, debug=nil, verbose=nil)
     @ticker = ticker
+    @quarterly = quarterly
+    @debug = debug
+    @verbose = debug || verbose
 
     google = "https://www.google.com/finance?q=NYSE%3A#{ticker}&fstype=iii" 
     goog_says = open(google) rescue nil
 
     google_finance_page = Nokogiri::HTML(goog_says)
 
+    yahoo = "http://finance.yahoo.com/q?s=#{ticker.downcase}"
+    yahoo_says = open(yahoo) rescue nil
+    yahoo_finance_page = Nokogiri::HTML(yahoo_says)
+
     ycharts = "http://ycharts.com/companies/#{ticker.upcase}/price_to_book_value"
     ycharts_says = open(ycharts) rescue nil
+    ycharts_page = Nokogiri::HTML(ycharts_says)
+
+    timeframe = quarterly ? "interim" : "annual"
+
+    @balance_sheet    = google_finance_page.css("#bal#{timeframe}div > #fs-table tr")
+    @income_statement = google_finance_page.css("#inc#{timeframe}div > #fs-table tr")
+    @cash_flow        = google_finance_page.css("#cas#{timeframe}div > #fs-table tr")
+    @price            =  yahoo_finance_page.css("#yfs_l84_#{@ticker.downcase}").text.to_f rescue nil
+    @price_to_book    =        ycharts_page.css("#pgNameVal").text.split[0].to_f rescue nil
     
-    duration = quarterly ? "interim" : "annual"
-    
-    @balance_sheet = google_finance_page.css("#bal#{duration}div > #fs-table tr")
-    @income_statement = google_finance_page.css("#inc#{duration}div > #fs-table tr")
-    @cash_flow = google_finance_page.css("#cas#{duration}div > #fs-table tr")
-    @price_to_book = Nokogiri::HTML(ycharts_says).css("#pgNameVal").text.split[0].to_f rescue nil
+    shares_outstanding_columns = statement(@balance_sheet, /Total Common Shares Outstanding/)
+
+    @so_now  = shares_outstanding_columns[0]
+    @so_then = shares_outstanding_columns[1]
   end
     
   def statement(statement_section, pattern)
@@ -42,15 +56,17 @@ class CompanyFundamentals
     @tl_now  = total_liabilities_columns[0]
   end
 
-  def book_to_market(verbose = nil)
-    #parse_book_value_statements
-    bm = 1/@price_to_book
+  def book_to_market
+    parse_book_value_statements
+    book_value = (@ta_now - @tl_now)/@so_now
+    my_bm = book_value/@price
 
-    #puts "book value is  : " + book_value.to_s if verbose
-    puts "price to book is : " + @price_to_book.to_s if verbose
-    puts "book to market   : " + bm.to_s if verbose
+    puts "book value is  : " + book_value.to_s if @verbose
+    puts "price is       : " + @price.to_s if @verbose
+    puts "book to market : " + my_bm.to_s if @verbose
+    puts "ycharts bm     : " + (1/@price_to_book).to_s if @verbose
 
-    bm
+    my_bm
   end
 
   def parse_piotroski_statements
@@ -97,104 +113,97 @@ class CompanyFundamentals
 
     @rev_now  = revenue_columns[0]
     @rev_then = revenue_columns[1]
-
-    shares_outstanding_columns = statement(@balance_sheet, /Total Common Shares Outstanding/)
-
-    @so_now  = shares_outstanding_columns[0]
-    @so_then = shares_outstanding_columns[1]
   end
 
-  def piotroski_score(debug=nil)
+  def check_it(message, test)
+    if @verbose
+      puts message
+    end
+    if test
+      ret = 1
+      if @verbose
+        puts 1
+        puts "---"
+      end
+    elsif @verbose
+      puts 0 
+      puts "---"
+    end
+    ret || 0
+  end
+
+  def piotroski_score()
     parse_piotroski_statements
 
     sum = 0
-  
-    # first   : 1 point if ni_now >= 0
-    puts "---"
-    puts @ni_now >= 0  ? (sum+=1; 1) : 0
-    puts "---"
-#    if debug
-#      puts net_income_columns.to_s
-#      puts "ni_now : " + ni_now.to_s
-#      puts "ni_then : " + ni_then.to_s
-#      puts "---"
-#    end
-    # second  : 1 point if cf_now >= 0
-    puts @cf_now >= 0 ? (sum+=1; 1)  : 0 
-    puts "---"
-#    if debug
-#      puts cash_flow_columns.to_s
-#      puts "cf_now : " + cf_now.to_s
-#      puts "cf_then : " + cf_then.to_s 
-#      puts "---"
-#    end
-    # third   : 1 point if ni_now/ta[2] >= ni[3]/ta[3]
-    puts @ni_now/@ta_now >= @ni_then/@ta_then ? (sum+=1; 1)  : 0
-    puts "---"
-#    if debug
-#      puts total_assets_columns.to_s
-#      puts "ta_now : " + ta_now.to_s
-#      puts "ta_then : " + ta_then.to_s
-#      puts "---"
-#    end
-    # fourth  : 1 point if ni_now >= cf_now
-    puts @ni_now <= @cf_now ? (sum+=1; 1)  : 0
-    puts "---"
-    # fifth   : 1 point if lt[2]/ta[2] <= lt[3]/ta[3]
-    puts @lt_now/@ta_now <= @lt_then/@ta_then ? (sum+=1; 1)  : 0
-    puts "---"
-#    if debug
-#      puts long_term_debt_columns.to_s
-#      puts "lt_now : " + lt_now.to_s
-#      puts "lt_then : " + lt_then.to_s
-#      puts "---"
-#    end
-    # sixth   : 1 point if ca[2]/cl[2]>ca[3]/cl[3]
+
+    sum += check_it("Positive Net Income  : 1 point if ni_now >= 0", @ni_now >= 0)
+    if @debug
+      puts "ni_now : " + @ni_now.to_s
+      puts "ni_then : " + @ni_then.to_s
+      puts "---"
+    end
+
+    sum += check_it("Cash Flow Positive  : 1 point if cf_now >= 0", @cf_now >= 0)
+    if @debug
+      puts "cf_now : " + @cf_now.to_s
+      puts "cf_then : " + @cf_then.to_s 
+      puts "---"
+    end
+
+    
+    sum += check_it("Net Income to Total Assets : 1 point if ni_now/ta_now >= ni_then/ta_then", @ni_now/@ta_now >= @ni_then/@ta_then)
+    if @debug
+      puts "ta_now : " + @ta_now.to_s
+      puts "ta_then : " + @ta_then.to_s
+      puts "---"
+    end
+
+    sum += check_it("Net Income and Cash Flow : 1 point if ni_now >= cf_now", @ni_now <= @cf_now )
+
+    check_it("Debt to Assets : 1 point if lt_now/ta_now <= lt_then/ta_then", @lt_now/@ta_now <= @lt_then/@ta_then)
+    if @debug
+      puts "lt_now : " + @lt_now.to_s
+      puts "lt_then : " + @lt_then.to_s
+      puts "---"
+    end
+    
     safe_ca_to_cl_now  = @ca_now == 0 ? 0 : @ca_now/@cl_now
     safe_ca_to_cl_then = @ca_then == 0 ? 0 : @ca_then/@cl_then
-    puts safe_ca_to_cl_now >= safe_ca_to_cl_then ? (sum+=1; 1) : 0
-    puts "---"
-#    if debug
-#      puts current_assets_columns.to_s
-#      puts "ca_now : " + ca_now.to_s
-#      puts "ca_then : " + ca_then.to_s
-#      puts current_liabilities_columns.to_s
-#      puts "cl_now : " + cl_now.to_s
-#      puts "cl_then : " + cl_then.to_s
-#      puts "---"
-#    end
-    # seventh : 1 point if so[2]<=so[3]
-    puts @so_now <= @so_then ? (sum+=1; 1) : 0
-    puts "---"
-#    if debug
-#      puts shares_outstanding_columns.to_s
-#      puts "so_now : " + so_now.to_s
-#      puts "so_then : " + so_then.to_s
-#      puts "---"
-#    end
-    puts "eighth (Gross Margin) : 1 point if gp_now/rev_now>gp_then/rev_then" if debug
-    puts @gp_now/@rev_now>@gp_then/@rev_then ? (sum+=1; 1)  : @gp_now/@rev_now == @gp_then/@rev_then ? (sum+=0.5; 0.5) : 0
-    puts "---"
-#    if debug
-#      puts "calculated_values : " + (gp_now/rev_now).to_s + " " + (gp_then/rev_then).to_s
-#      puts gross_profit_columns.to_s
-#      puts "gp_now : " + gp_now.to_s
-#      puts "gp_then : " + gp_then.to_s
-#      puts revenue_columns.to_s
-#      puts "rev_now : " + rev_now.to_s
-#      puts "rev_then : " + rev_then.to_s
-#      puts "---"
-#    end
-    # ninth   : 1 point if rev[3]-rev[2]>ta[3]-ta[2]
-    puts @rev_now-@rev_then>@ta_now-@ta_then ? (sum+=1; 1)  : 0
-    puts "---"
-#    if debug
-#      puts total_assets_columns.to_s
-#      puts "ta_now : " + ta_now.to_s
-#      puts "ta_then : " + ta_then.to_s
-#    end
-    puts "Total ANNUAL Score for ticker #{@ticker} : " + sum.to_s if debug
+    sum += check_it("Current Ratio : 1 point if ca_now/cl_now>ca_then/cl_then", safe_ca_to_cl_now >= safe_ca_to_cl_then)
+    if @debug
+      puts "ca_now : " + @ca_now.to_s
+      puts "ca_then : " + @ca_then.to_s
+      puts "cl_now : " + @cl_now.to_s
+      puts "cl_then : " + @cl_then.to_s
+      puts "---"
+    end
+
+    sum += check_it("Shares Outstanding : 1 point if so_now<=so_then", @so_now <= @so_then)
+    if @debug
+      puts "so_now : " + @so_now.to_s
+      puts "so_then : " + @so_then.to_s
+      puts "---" 
+    end
+    
+    sum += check_it("Gross Margin : 1 point if gp_now/rev_now>gp_then/rev_then", @gp_now/@rev_now>@gp_then/@rev_then)
+    if @debug
+      puts "calculated_values : " + (@gp_now/@rev_now).to_s + " " + (@gp_then/@rev_then).to_s
+      puts "gp_now : " + @gp_now.to_s
+      puts "gp_then : " + @gp_then.to_s
+      puts "rev_now : " + @rev_now.to_s
+      puts "rev_then : " + @rev_then.to_s
+      puts "---"
+    end
+
+    sum += check_it("Change in Revenue vs Change in Assets : 1 point if rev_then-rev_now>ta_then-ta_now", @rev_now-@rev_then>@ta_now-@ta_then)
+    if @debug
+      puts "ta_now : " + @ta_now.to_s
+      puts "ta_then : " + @ta_then.to_s
+    end
+    puts "------------------------------------------------------------" unless @verbose
+    puts "Total #{@quarterly ? "QUARTERLY" : "ANNUAL"} Score for ticker #{@ticker} : " + sum.to_s
+    puts "------------------------------------------------------------" unless @verbose
     sum
   end
 end
-

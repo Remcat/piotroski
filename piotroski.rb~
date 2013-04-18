@@ -26,7 +26,7 @@ if __FILE__ == $0
 
     (1..Tickers.count).to_a.each do |id|
       t = Tickers.find(id).ticker
-      c = CompanyFundamentals.new(t, q)
+      c = CompanyFundamentals.new(t, quarterly)
       puts t
       bm = c.book_to_market rescue 0
       bm = bm  == 1/0.0 ? nil : bm
@@ -34,9 +34,11 @@ if __FILE__ == $0
     end
   
   else 
+
     ticker = 'AAPL' unless ticker
-    c = CompanyFundamentals.new(ticker, q, d, v)
-    c.book_to_market
-    c.piotroski_score
+    c = CompanyFundamentals.new(ticker, quarterly)
+    c.book_to_market(verbose)
+    c.piotroski_score(debug)
+
   end
 end
