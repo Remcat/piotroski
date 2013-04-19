@@ -28,12 +28,7 @@ class CompanyFundamentals
     @income_statement = google_finance_page.css("#inc#{timeframe}div > #fs-table tr")
     @cash_flow        = google_finance_page.css("#cas#{timeframe}div > #fs-table tr")
     @price            =  yahoo_finance_page.css("#yfs_l84_#{@ticker.downcase}").text.to_f rescue nil
-    @price_to_book    =        ycharts_page.css("#pgNameVal").text.split[0].to_f rescue nil
-    
-    shares_outstanding_columns = statement(@balance_sheet, /Total Common Shares Outstanding/)
-
-    @so_now  = shares_outstanding_columns[0]
-    @so_then = shares_outstanding_columns[1]
+    @price_to_book    =        ycharts_page.css("#pgNameVal").text.split[0].to_f rescue nil    
   end
     
   def statement(statement_section, pattern)
@@ -45,6 +40,15 @@ class CompanyFundamentals
     tr.css('td')[1..-1].map { |td| td.text.delete(",").to_f }
   end
 
+  def calculate_so    
+    unless @so_now
+      shares_outstanding_columns = statement(@balance_sheet, /Total Common Shares Outstanding/)
+
+      @so_now  = shares_outstanding_columns[0]
+      @so_then = shares_outstanding_columns[1]
+    end
+  end
+
   def parse_book_value_statements    
     total_assets_columns = statement(@balance_sheet, /Total Assets/)
 
@@ -54,6 +58,8 @@ class CompanyFundamentals
     total_liabilities_columns = statement(@balance_sheet, /Total Liabilities/)
 
     @tl_now  = total_liabilities_columns[0]
+
+    calculate_so
   end
 
   def book_to_market
@@ -113,6 +119,8 @@ class CompanyFundamentals
 
     @rev_now  = revenue_columns[0]
     @rev_then = revenue_columns[1]
+
+    calculate_so
   end
 
   def check_it(message, test)

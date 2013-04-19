@@ -23,14 +23,15 @@ if __FILE__ == $0
   v = ARGV.delete "-v"
   q = ARGV.delete "-q"
   if ticker == 'all-tickers'
-
-    (1..Tickers.count).to_a.each do |id|
+    
+    field = q ? :quarterly_score : :annual_score
+    Tickers.where(field => nil).each do |id|
       t = Tickers.find(id).ticker
       c = CompanyFundamentals.new(t, q)
       puts t
       bm = c.book_to_market rescue 0
       bm = bm  == 1/0.0 ? nil : bm
-      Tickers.update(id, :annual_score => begin c.piotroski_score rescue nil end, :book_to_market => bm)
+      Tickers.update(id, field => begin c.piotroski_score rescue nil end, :book_to_market => bm)
     end
   
   else 
