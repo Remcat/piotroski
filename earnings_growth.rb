@@ -37,7 +37,7 @@ url = "http://financials.morningstar.com/ajax/ReportProcess4HtmlAjax.html?&t=#{t
 
 Tickers.where("ticker NOT IN (?)", finished).each do |t|
   ticker = t.ticker
-  puts ticker
+  #puts ticker
   response = open(url).read
   json = (response && response.length >= 2) ? JSON.parse(response[/{.*}/]) : nil
   doc = Nokogiri::HTML json['result'] rescue nil
@@ -45,6 +45,6 @@ Tickers.where("ticker NOT IN (?)", finished).each do |t|
   year_five_earnings = clean_numbers(doc.css("#data_i84 > #Y_5").text rescue 0)
   growth_multiple = year_five_earnings/year_one_earnings
   growth_rate = growth_multiple ** (1.0/5.0)
-  puts growth_rate if growth_rate >= 20
+  puts ticker + " : " + growth_rate.to_s if growth_rate >= 20
   FastGrowers.create_or_update(:id => t.id, :ticker => ticker, :five_year_growth_rate => growth_rate) 
 end
